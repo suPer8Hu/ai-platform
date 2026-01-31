@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/suPer8Hu/ai-platform/internal/ai"
 	"gorm.io/gorm"
@@ -22,8 +23,8 @@ func NewService(repo *Repo, provider ai.Provider, contextWindowSize int) *Servic
 }
 
 const (
-	defaultProvider = "fake"
-	defaultModel    = "default"
+	defaultProvider = "ollama"
+	defaultModel    = "llama3:latest"
 )
 
 func (s *Service) CreateSession(ctx context.Context, userID uint64, provider, model string) (*Session, error) {
@@ -117,4 +118,103 @@ func (s *Service) ListMessages(ctx context.Context, userID uint64, sessionID str
 		limit = 50
 	}
 	return s.repo.ListMessages(ctx, userID, sessionID, limit, beforeID)
+}
+
+// SendMessageStream stores the user message immediately, streams assistant chunks,
+// and finally stores the assistant message after streaming completes.
+func (s *Service) SendMessageStream(ctx context.Context, userID uint64, sessionID string, content string) (chunks <-chan string, done <-chan struct{}, assistantMsgID <-chan uint64, errs <-chan error) {
+	outChunks := make(chan string, 16)
+	outDone := make(chan struct{})
+	outMsgID := make(chan uint64, 1)
+	outErrs := make(chan error, 1)
+
+	go func() {
+		defer close(outChunks)
+		defer close(outDone)
+		defer close(outMsgID)
+		defer close(outErrs)
+
+		// 1) session ownership check
+		sess, err := s.repo.GetSessionBySessionID(ctx, sessionID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				outErrs <- gorm.ErrRecordNotFound
+				return
+			}
+			outErrs <- err
+			return
+		}
+		if sess.UserID != userID {
+			outErrs <- gorm.ErrRecordNotFound
+			return
+		}
+
+		// 2) insert user message
+		userMsg := &Message{
+			SessionID: sessionID,
+			UserID:    userID,
+			Role:      "user",
+			Content:   content,
+		}
+		if err := s.repo.InsertMessage(ctx, userMsg); err != nil {
+			outErrs <- err
+			return
+		}
+
+		// 3) load recent messages, build provider context (ASC)
+		recentDesc, err := s.repo.ListRecentMessagesDesc(ctx, userID, sessionID, s.contextWindowSize)
+		if err != nil {
+			outErrs <- err
+			return
+		}
+		providerMsgs := make([]ai.Message, 0, len(recentDesc))
+		for i := len(recentDesc) - 1; i >= 0; i-- {
+			m := recentDesc[i]
+			providerMsgs = append(providerMsgs, ai.Message{Role: m.Role, Content: m.Content})
+		}
+
+		sp, ok := s.provider.(ai.StreamProvider)
+		if !ok {
+			outErrs <- errors.New("provider does not support streaming")
+			return
+		}
+
+		// 4) stream from provider
+		pChunks, pErrs := sp.StreamChat(ctx, providerMsgs)
+
+		var b strings.Builder
+		for c := range pChunks {
+			b.WriteString(c)
+			outChunks <- c
+		}
+
+		// provider error (if any)
+		select {
+		case err := <-pErrs:
+			if err != nil {
+				outErrs <- err
+				return
+			}
+		default:
+			// no error sent
+		}
+
+		reply := b.String()
+
+		// 5) insert assistant message at the end
+		assistantMsg := &Message{
+			SessionID: sessionID,
+			UserID:    userID,
+			Role:      "assistant",
+			Content:   reply,
+		}
+		if err := s.repo.InsertMessage(ctx, assistantMsg); err != nil {
+			outErrs <- err
+			return
+		}
+
+		outMsgID <- assistantMsg.ID
+	}()
+
+	return outChunks, outDone, outMsgID, outErrs
 }

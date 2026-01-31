@@ -48,6 +48,6 @@ func NewRouter(db *gorm.DB, cfg config.Config, rds *redisstore.Store) *gin.Engin
 	authGroup.POST("/chat/sessions", h.CreateChatSession)
 	authGroup.POST("/chat/messages", h.SendChatMessage)
 	authGroup.GET("/chat/sessions/:session_id/messages", h.ListChatMessages)
-
+	authGroup.POST("/chat/messages/stream", h.SendChatMessageStream)
 	return r
 }

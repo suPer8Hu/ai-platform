@@ -19,6 +19,11 @@ type Config struct {
 	SMTPPass              string
 	SMTPFrom              string
 	ChatContextWindowSize int
+
+	// AI provider
+	AIProvider    string
+	OllamaBaseURL string
+	OllamaModel   string
 }
 
 func Load() Config {
@@ -67,6 +72,22 @@ func Load() Config {
 		}
 	}
 
+	// AI provider config
+	aiProvider := os.Getenv("AI_PROVIDER")
+	if aiProvider == "" {
+		aiProvider = "ollama"
+	}
+
+	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
+	if ollamaBaseURL == "" {
+		ollamaBaseURL = "http://localhost:11434"
+	}
+
+	ollamaModel := os.Getenv("OLLAMA_MODEL")
+	if ollamaModel == "" {
+		ollamaModel = "llama3:latest"
+	}
+
 	return Config{
 		DBDSN:     dsn,
 		JWTSecret: secret,
@@ -81,5 +102,9 @@ func Load() Config {
 		SMTPPass:              os.Getenv("SMTP_PASS"),
 		SMTPFrom:              smtpFrom,
 		ChatContextWindowSize: windowSize,
+
+		AIProvider:    aiProvider,
+		OllamaBaseURL: ollamaBaseURL,
+		OllamaModel:   ollamaModel,
 	}
 }
