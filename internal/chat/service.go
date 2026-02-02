@@ -11,15 +11,15 @@ import (
 
 type Service struct {
 	repo              *Repo
-	provider          ai.Provider
+	registry          *ai.Registry
 	contextWindowSize int
 }
 
-func NewService(repo *Repo, provider ai.Provider, contextWindowSize int) *Service {
+func NewService(repo *Repo, registry *ai.Registry, contextWindowSize int) *Service {
 	if contextWindowSize <= 0 || contextWindowSize > 100 {
 		contextWindowSize = 20
 	}
-	return &Service{repo: repo, provider: provider, contextWindowSize: contextWindowSize}
+	return &Service{repo: repo, registry: registry, contextWindowSize: contextWindowSize}
 }
 
 const (
@@ -53,6 +53,18 @@ func (s *Service) CreateSession(ctx context.Context, userID uint64, provider, mo
 	return session, nil
 }
 
+func (s *Service) providerForSession(ctx context.Context, sess *Session) (ai.Provider, error) {
+	p := sess.Provider
+	m := sess.Model
+	if p == "" {
+		p = defaultProvider
+	}
+	if m == "" {
+		m = defaultModel
+	}
+	return s.registry.Get(ctx, p, m)
+}
+
 func (s *Service) SendMessage(ctx context.Context, userID uint64, sessionID string, content string) (reply string, assistantMsgID uint64, err error) {
 	// 1) verify session ownership
 	session, err := s.repo.GetSessionBySessionID(ctx, sessionID)
@@ -64,6 +76,12 @@ func (s *Service) SendMessage(ctx context.Context, userID uint64, sessionID stri
 	}
 	if session.UserID != userID {
 		return "", 0, gorm.ErrRecordNotFound
+	}
+
+	//  pick provider/model for this session
+	provider, err := s.providerForSession(ctx, session)
+	if err != nil {
+		return "", 0, err
 	}
 
 	// 2) store user message (strong consistency)
@@ -94,7 +112,7 @@ func (s *Service) SendMessage(ctx context.Context, userID uint64, sessionID stri
 	}
 
 	// 4) call provider
-	reply, err = s.provider.Chat(ctx, providerMsgs)
+	reply, err = provider.Chat(ctx, providerMsgs)
 	if err != nil {
 		return "", 0, err
 	}
@@ -149,6 +167,13 @@ func (s *Service) SendMessageStream(ctx context.Context, userID uint64, sessionI
 			return
 		}
 
+		// pick provider/model for this session
+		provider, err := s.providerForSession(ctx, sess)
+		if err != nil {
+			outErrs <- err
+			return
+		}
+
 		// 2) insert user message
 		userMsg := &Message{
 			SessionID: sessionID,
@@ -173,7 +198,7 @@ func (s *Service) SendMessageStream(ctx context.Context, userID uint64, sessionI
 			providerMsgs = append(providerMsgs, ai.Message{Role: m.Role, Content: m.Content})
 		}
 
-		sp, ok := s.provider.(ai.StreamProvider)
+		sp, ok := provider.(ai.StreamProvider)
 		if !ok {
 			outErrs <- errors.New("provider does not support streaming")
 			return
@@ -255,8 +280,20 @@ func (s *Service) GetJob(ctx context.Context, jobID string) (*Job, error) {
 }
 
 func (s *Service) GenerateAssistantReplyAndInsert(ctx context.Context, userID uint64, sessionID string) (string, uint64, error) {
-	// session ownership check
-	if err := s.ValidateSessionOwner(ctx, userID, sessionID); err != nil {
+	// session ownership check + get session for provider routing
+	sess, err := s.repo.GetSessionBySessionID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", 0, gorm.ErrRecordNotFound
+		}
+		return "", 0, err
+	}
+	if sess.UserID != userID {
+		return "", 0, gorm.ErrRecordNotFound
+	}
+
+	provider, err := s.providerForSession(ctx, sess)
+	if err != nil {
 		return "", 0, err
 	}
 
@@ -272,7 +309,7 @@ func (s *Service) GenerateAssistantReplyAndInsert(ctx context.Context, userID ui
 		providerMsgs = append(providerMsgs, ai.Message{Role: m.Role, Content: m.Content})
 	}
 
-	reply, err := s.provider.Chat(ctx, providerMsgs)
+	reply, err := provider.Chat(ctx, providerMsgs)
 	if err != nil {
 		return "", 0, err
 	}

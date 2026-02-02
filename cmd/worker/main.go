@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -45,15 +46,28 @@ func main() {
 	repo := chat.NewRepo(gdb)
 
 	// Provider
-	var provider ai.Provider
-	switch cfg.AIProvider {
-	case "", "ollama":
-		provider = ai.NewOllamaProvider(cfg.OllamaBaseURL, cfg.OllamaModel)
-	default:
-		log.Fatalf("unsupported AI_PROVIDER=%q", cfg.AIProvider)
-	}
+	// var provider ai.Provider
+	// switch cfg.AIProvider {
+	// case "", "ollama":
+	// 	provider = ai.NewOllamaProvider(cfg.OllamaBaseURL, cfg.OllamaModel)
+	// default:
+	// 	log.Fatalf("unsupported AI_PROVIDER=%q", cfg.AIProvider)
+	// }
 
-	svc := chat.NewService(repo, provider, cfg.ChatContextWindowSize)
+	// Provider registry (route by session.Provider + session.Model)
+	reg := ai.NewRegistry()
+
+	// Register Ollama (default)
+	reg.Register("ollama", func(ctx context.Context, model string) (ai.Provider, error) {
+		_ = ctx
+		m := strings.TrimSpace(model)
+		if m == "" {
+			m = cfg.OllamaModel
+		}
+		return ai.NewOllamaProvider(cfg.OllamaBaseURL, m), nil
+	})
+
+	svc := chat.NewService(repo, reg, cfg.ChatContextWindowSize)
 
 	conn, err := amqp.Dial(cfg.RabbitURL)
 	if err != nil {

@@ -37,8 +37,16 @@ func TestSendMessage_WritesUserAndAssistant(t *testing.T) {
 	db := openTestDB(t)
 
 	repo := NewRepo(db)
+
 	prov := &recordingProvider{}
-	svc := NewService(repo, prov, 20)
+	reg := ai.NewRegistry()
+	reg.Register("fake", func(ctx context.Context, model string) (ai.Provider, error) {
+		_ = ctx
+		_ = model
+		return prov, nil
+	})
+
+	svc := NewService(repo, reg, 20)
 
 	// create session
 	sess := &Session{
@@ -85,9 +93,17 @@ func TestSendMessage_UsesContextWindow(t *testing.T) {
 	db := openTestDB(t)
 
 	repo := NewRepo(db)
+
 	prov := &recordingProvider{}
+	reg := ai.NewRegistry()
+	reg.Register("fake", func(ctx context.Context, model string) (ai.Provider, error) {
+		_ = ctx
+		_ = model
+		return prov, nil
+	})
+
 	window := 3
-	svc := NewService(repo, prov, window)
+	svc := NewService(repo, reg, window)
 
 	sess := &Session{
 		SessionID: "01TESTSESSIONID00000000000001",
