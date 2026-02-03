@@ -145,3 +145,50 @@ func (r *Repo) CreateJobOrGetExisting(ctx context.Context, job *Job) (*Job, bool
 	}
 	return nil, false, getErr
 }
+
+func (r *Repo) GetUserMessageByIdempotencyKey(ctx context.Context, userID uint64, sessionID string, key string) (*Message, error) {
+	var msg Message
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND session_id = ? AND idempotency_key = ? AND role = ?", userID, sessionID, key, "user").
+		First(&msg).Error
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// InsertUserMessageOrGetExisting inserts a user message, but if the same (user_id, session_id, idempotency_key)
+// already exists, it returns the existing one instead.
+func (r *Repo) InsertUserMessageOrGetExisting(ctx context.Context, userID uint64, sessionID string, content string, key *string) (*Message, bool, error) {
+	msg := &Message{
+		UserID:         userID,
+		SessionID:      sessionID,
+		Role:           "user",
+		Content:        content,
+		IdempotencyKey: nil,
+	}
+
+	if key == nil || *key == "" {
+		if err := r.db.WithContext(ctx).Create(msg).Error; err != nil {
+			return nil, false, err
+		}
+		return msg, true, nil
+	}
+
+	msg.IdempotencyKey = key
+
+	err := r.db.WithContext(ctx).Create(msg).Error
+	if err == nil {
+		return msg, true, nil
+	}
+
+	// On unique conflict, fetch existing.
+	existing, getErr := r.GetUserMessageByIdempotencyKey(ctx, userID, sessionID, *key)
+	if getErr == nil {
+		return existing, false, nil
+	}
+	if errors.Is(getErr, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	return nil, false, getErr
+}

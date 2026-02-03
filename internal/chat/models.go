@@ -15,12 +15,13 @@ type Session struct {
 func (Session) TableName() string { return "chat_sessions" }
 
 type Message struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	SessionID string    `gorm:"type:varchar(26);not null;index:idx_chat_msg_user_session_id,priority:2" json:"session_id"`
-	UserID    uint64    `gorm:"not null;index:idx_chat_msg_user_session_id,priority:1" json:"-"`
-	Role      string    `gorm:"type:varchar(16);index;not null" json:"role"` // "user" | "assistant"
-	Content   string    `gorm:"type:text;not null" json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	SessionID      string    `gorm:"type:varchar(26);not null;index:idx_chat_msg_user_session_id,priority:2;index:uniq_chat_msg_idempo,unique,priority:2" json:"session_id"`
+	UserID         uint64    `gorm:"not null;index:idx_chat_msg_user_session_id,priority:1;index:uniq_chat_msg_idempo,unique,priority:1" json:"-"`
+	Role           string    `gorm:"type:varchar(16);index;not null" json:"role"`
+	Content        string    `gorm:"type:text;not null" json:"content"`
+	IdempotencyKey *string   `gorm:"type:varchar(128);index:uniq_chat_msg_idempo,unique,priority:3" json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (Message) TableName() string { return "chat_messages" }

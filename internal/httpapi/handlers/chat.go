@@ -288,18 +288,7 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 		return
 	}
 
-	// Insert user message immediately (A-mode)
-	// NOTE: still not idempotent; can be addressed later with message-level idempotency.
-	if err := h.ChatSvc.InsertUserMessage(c.Request.Context(), uid, req.SessionID, req.Message); err != nil {
-		if err == gorm.ErrRecordNotFound {
-			fail(c, http.StatusNotFound, 40401, "session not found")
-			return
-		}
-		log.Printf("[SendChatMessageAsync] InsertUserMessage failed uid=%d session_id=%s err=%v", uid, req.SessionID, err)
-		fail(c, http.StatusInternalServerError, 50001, "internal error")
-		return
-	}
-
+	// Build job (ID only matters if we end up creating a new row)
 	jobID, err := common.NewULID()
 	if err != nil {
 		log.Printf("[SendChatMessageAsync] NewULID failed uid=%d session_id=%s err=%v", uid, req.SessionID, err)
@@ -307,7 +296,6 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 		return
 	}
 
-	// Create job row (idempotent if key is provided)
 	j := &chat.Job{
 		ID:             jobID,
 		UserID:         uid,
@@ -319,7 +307,7 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 
 	created := true
 	if idempoKeyPtr == nil {
-		// backward-compatible: always new job
+		// no idempotency -> always new job
 		if err := h.ChatSvc.CreateJob(c.Request.Context(), j); err != nil {
 			log.Printf("[SendChatMessageAsync] CreateJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, jobID, err)
 			fail(c, http.StatusInternalServerError, 50001, "internal error")
@@ -333,12 +321,31 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 			fail(c, http.StatusInternalServerError, 50001, "internal error")
 			return
 		}
-		// If existing, use its ID for response/publish decision
 		j = job
 	}
 
-	// Enqueue only when a new job was created
+	// Only the creator should insert the user message and enqueue the job.
 	if created {
+		// Insert user message (idempotent when key is present)
+		if idempoKeyPtr == nil {
+			if err := h.ChatSvc.InsertUserMessage(c.Request.Context(), uid, req.SessionID, req.Message); err != nil {
+				if err == gorm.ErrRecordNotFound {
+					fail(c, http.StatusNotFound, 40401, "session not found")
+					return
+				}
+				log.Printf("[SendChatMessageAsync] InsertUserMessage failed uid=%d session_id=%s err=%v", uid, req.SessionID, err)
+				fail(c, http.StatusInternalServerError, 50001, "internal error")
+				return
+			}
+		} else {
+			if _, _, err := h.ChatSvc.InsertUserMessageOrGetExisting(c.Request.Context(), uid, req.SessionID, req.Message, idempoKeyPtr); err != nil {
+				log.Printf("[SendChatMessageAsync] InsertUserMessageOrGetExisting failed uid=%d session_id=%s key=%s err=%v", uid, req.SessionID, idempoKey, err)
+				fail(c, http.StatusInternalServerError, 50001, "internal error")
+				return
+			}
+		}
+
+		// Enqueue
 		if err := h.Rabbit.PublishJob(c.Request.Context(), j.ID); err != nil {
 			log.Printf("[SendChatMessageAsync] PublishJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, j.ID, err)
 			fail(c, http.StatusInternalServerError, 50002, "enqueue failed")
