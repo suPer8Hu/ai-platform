@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -264,6 +265,18 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 		return
 	}
 
+	// read idempotency key
+	idempoKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempoKey) > 128 {
+		fail(c, http.StatusBadRequest, 10003, "idempotency key too long")
+		return
+	}
+
+	var idempoKeyPtr *string
+	if idempoKey != "" {
+		idempoKeyPtr = &idempoKey
+	}
+
 	// Validate session belongs to user
 	if err := h.ChatSvc.ValidateSessionOwner(c.Request.Context(), uid, req.SessionID); err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -276,6 +289,7 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 	}
 
 	// Insert user message immediately (A-mode)
+	// NOTE: still not idempotent; can be addressed later with message-level idempotency.
 	if err := h.ChatSvc.InsertUserMessage(c.Request.Context(), uid, req.SessionID, req.Message); err != nil {
 		if err == gorm.ErrRecordNotFound {
 			fail(c, http.StatusNotFound, 40401, "session not found")
@@ -293,29 +307,46 @@ func (h *Handler) SendChatMessageAsync(c *gin.Context) {
 		return
 	}
 
-	// Create job row
+	// Create job row (idempotent if key is provided)
 	j := &chat.Job{
-		ID:        jobID,
-		UserID:    uid,
-		SessionID: req.SessionID,
-		Prompt:    req.Message,
-		Status:    chat.JobQueued,
-	}
-	if err := h.ChatSvc.CreateJob(c.Request.Context(), j); err != nil {
-		log.Printf("[SendChatMessageAsync] CreateJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, jobID, err)
-		fail(c, http.StatusInternalServerError, 50001, "internal error")
-		return
+		ID:             jobID,
+		UserID:         uid,
+		SessionID:      req.SessionID,
+		Prompt:         req.Message,
+		IdempotencyKey: idempoKeyPtr,
+		Status:         chat.JobQueued,
 	}
 
-	// Enqueue
-	if err := h.Rabbit.PublishJob(c.Request.Context(), jobID); err != nil {
-		log.Printf("[SendChatMessageAsync] PublishJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, jobID, err)
-		// mark job failed (optional); simplest: keep queued + client can retry enqueue later
-		fail(c, http.StatusInternalServerError, 50002, "enqueue failed")
-		return
+	created := true
+	if idempoKeyPtr == nil {
+		// backward-compatible: always new job
+		if err := h.ChatSvc.CreateJob(c.Request.Context(), j); err != nil {
+			log.Printf("[SendChatMessageAsync] CreateJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, jobID, err)
+			fail(c, http.StatusInternalServerError, 50001, "internal error")
+			return
+		}
+	} else {
+		var job *chat.Job
+		job, created, err = h.ChatSvc.CreateJobOrGetExisting(c.Request.Context(), j)
+		if err != nil {
+			log.Printf("[SendChatMessageAsync] CreateJobOrGetExisting failed uid=%d session_id=%s job_id=%s key=%s err=%v", uid, req.SessionID, jobID, idempoKey, err)
+			fail(c, http.StatusInternalServerError, 50001, "internal error")
+			return
+		}
+		// If existing, use its ID for response/publish decision
+		j = job
 	}
 
-	ok(c, gin.H{"job_id": jobID})
+	// Enqueue only when a new job was created
+	if created {
+		if err := h.Rabbit.PublishJob(c.Request.Context(), j.ID); err != nil {
+			log.Printf("[SendChatMessageAsync] PublishJob failed uid=%d session_id=%s job_id=%s err=%v", uid, req.SessionID, j.ID, err)
+			fail(c, http.StatusInternalServerError, 50002, "enqueue failed")
+			return
+		}
+	}
+
+	ok(c, gin.H{"job_id": j.ID})
 }
 
 func (h *Handler) GetChatJob(c *gin.Context) {

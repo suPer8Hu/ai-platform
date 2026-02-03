@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -103,4 +104,44 @@ func (r *Repo) MarkJobFailed(ctx context.Context, id string, errMsg string) erro
 			"error":             errMsg,
 			"result_message_id": nil,
 		}).Error
+}
+
+func (r *Repo) GetJobByUserAndIdempotencyKey(ctx context.Context, userID uint64, key string) (*Job, error) {
+	var job Job
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND idempotency_key = ?", userID, key).
+		First(&job).Error
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// CreateJobOrGetExisting tries to create a job, but if (user_id, idempotency_key) already exists,
+// it returns the existing job instead.
+
+func (r *Repo) CreateJobOrGetExisting(ctx context.Context, job *Job) (*Job, bool, error) {
+	if job.IdempotencyKey == nil || *job.IdempotencyKey == "" {
+		// No key provided -> old behavior
+		job.IdempotencyKey = nil
+		if err := r.db.WithContext(ctx).Create(job).Error; err != nil {
+			return nil, false, err
+		}
+		return job, true, nil
+	}
+
+	err := r.db.WithContext(ctx).Create(job).Error
+	if err == nil {
+		return job, true, nil
+	}
+
+	existing, getErr := r.GetJobByUserAndIdempotencyKey(ctx, job.UserID, *job.IdempotencyKey)
+	if getErr == nil {
+		return existing, false, nil
+	}
+
+	if errors.Is(getErr, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	return nil, false, getErr
 }

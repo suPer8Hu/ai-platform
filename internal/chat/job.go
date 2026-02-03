@@ -19,6 +19,8 @@ type Job struct {
 
 	Prompt string `gorm:"type:text;not null"`
 
+	IdempotencyKey *string `gorm:"type:varchar(128);index:uniq_user_idempo,unique" json:"idempotency_key"`
+
 	Status JobStatus `gorm:"type:varchar(16);index;not null"`
 
 	// Filled when succeeded

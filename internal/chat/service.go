@@ -325,3 +325,7 @@ func (s *Service) GenerateAssistantReplyAndInsert(ctx context.Context, userID ui
 	}
 	return reply, assistantMsg.ID, nil
 }
+
+func (s *Service) CreateJobOrGetExisting(ctx context.Context, job *Job) (*Job, bool, error) {
+	return s.repo.CreateJobOrGetExisting(ctx, job)
+}
