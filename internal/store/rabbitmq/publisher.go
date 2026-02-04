@@ -29,15 +29,54 @@ func NewPublisher(url, queue string) (*Publisher, error) {
 		return nil, err
 	}
 
-	_, err = ch.QueueDeclare(
-		queue,
+	// match worker
+	mainQ := queue
+	retryQ := queue + ".retry"
+	dlqQ := queue + ".dlq"
+
+	// DLQ
+	if _, err := ch.QueueDeclare(
+		dlqQ,
 		true,  // durable
 		false, // auto-delete
 		false, // exclusive
 		false,
 		nil,
-	)
-	if err != nil {
+	); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, err
+	}
+
+	// Retry queue: message TTL -> dead-letter back to main queue
+	if _, err := ch.QueueDeclare(
+		retryQ,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": mainQ,
+		},
+	); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, err
+	}
+
+	// Main queue: dead-letter to DLQ on reject/nack(requeue=false)
+	if _, err := ch.QueueDeclare(
+		mainQ,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": dlqQ,
+		},
+	); err != nil {
 		_ = ch.Close()
 		_ = conn.Close()
 		return nil, err
@@ -74,6 +113,7 @@ func (p *Publisher) PublishJob(ctx context.Context, jobID string) error {
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
 			Body:         body,
+			Timestamp:    time.Now(),
 		},
 	)
 }
