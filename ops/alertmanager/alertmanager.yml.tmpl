@@ -1,0 +1,21 @@
+global:
+  resolve_timeout: 5m
+
+  smtp_smarthost: ${SMTP_HOST}:${SMTP_PORT}
+  smtp_from: ${SMTP_FROM}
+  smtp_auth_username: ${SMTP_USER}
+  smtp_auth_password: ${SMTP_PASS}
+  smtp_require_tls: true
+
+route:
+  receiver: "email"
+  group_by: ["alertname", "queue"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2h
+
+receivers:
+  - name: "email"
+    email_configs:
+      - to: ${SMTP_TO}
+        send_resolved: true

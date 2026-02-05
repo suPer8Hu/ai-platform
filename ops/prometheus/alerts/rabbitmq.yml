@@ -1,0 +1,30 @@
+groups:
+  - name: rabbitmq-queues
+    rules:
+      # DLQ precise alert
+      - alert: RabbitMQDLQHasMessages
+        expr: rabbitmq_queue_messages_ready{queue=~".*\\.dlq"} > 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "RabbitMQ DLQ has messages (queue={{ $labels.queue }})"
+          description: "DLQ {{ $labels.queue }} has {{ $value }} ready messages for >2m. Investigate and consider redrive."
+
+      - alert: RabbitMQAnyQueueHasReadyMessages
+        expr: rabbitmq_queue_messages_ready > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "RabbitMQ has ready messages (global)"
+          description: "Some queue(s) have ready messages for >5m. Use per-queue metrics to investigate."
+
+      - alert: RabbitMQAnyQueueHasUnackedMessages
+        expr: rabbitmq_queue_messages_unacked > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "RabbitMQ has unacked messages (global)"
+          description: "rabbitmq_queue_messages_unacked={{ $value }} for >5m."
