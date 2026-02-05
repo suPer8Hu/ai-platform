@@ -29,6 +29,26 @@ func (r *Repo) GetSessionBySessionID(ctx context.Context, sessionID string) (*Se
 	return &s, nil
 }
 
+// Uses numeric DB primary key pagination with beforeID (id < beforeID).
+func (r *Repo) ListSessions(ctx context.Context, userID uint64, limit int, beforeID uint64) ([]Session, error) {
+	q := r.db.WithContext(ctx).
+		Model(&Session{}).
+		Where("user_id = ?", userID).
+		Order("updated_at DESC").
+		Order("id DESC").
+		Limit(limit)
+
+	if beforeID > 0 {
+		q = q.Where("id < ?", beforeID)
+	}
+
+	var sess []Session
+	if err := q.Find(&sess).Error; err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
 func (r *Repo) InsertMessage(ctx context.Context, m *Message) error {
 	return r.db.WithContext(ctx).Create(m).Error
 }

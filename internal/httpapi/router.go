@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/suPer8Hu/ai-platform/internal/common"
 	"github.com/suPer8Hu/ai-platform/internal/config"
@@ -28,6 +30,20 @@ func NewRouter(db *gorm.DB, cfg config.Config, rds *redisstore.Store) *gin.Engin
 
 	r.Use(middleware.RequestID())
 
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://localhost:3001",
+		},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization", "Idempotency-Key"},
+		ExposeHeaders: []string{
+			"X-Request-Id",
+		},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	h := handlers.NewHandler(db, cfg, rds)
 
 	r.GET("/ping", h.Ping)
@@ -46,6 +62,7 @@ func NewRouter(db *gorm.DB, cfg config.Config, rds *redisstore.Store) *gin.Engin
 	authGroup.GET("/me", h.Me)
 	// Chat (JWT required)
 	authGroup.POST("/chat/sessions", h.CreateChatSession)
+	authGroup.GET("/chat/sessions", h.ListChatSessions)
 	authGroup.POST("/chat/messages", h.SendChatMessage)
 	authGroup.POST("/chat/messages/stream", h.SendChatMessageStream)
 	authGroup.POST("/chat/messages/async", h.SendChatMessageAsync)

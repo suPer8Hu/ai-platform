@@ -114,7 +114,14 @@ func (h *Handler) CreateUser(c *gin.Context) {
 
 	// send welcome email
 	go func(to, uname string) {
-		_ = email.SendText(h.SMTPSetting, to, "Welcome to the AI-Platform", "Your username is: "+uname+"\n")
+		subject := "Welcome to GopherChat — Your account is ready"
+		body := "Hello,\n\n" +
+			"Welcome to GopherChat. Your account has been successfully created.\n\n" +
+			"Username: " + uname + "\n\n" +
+			"If you did not request this account, please contact our support immediately.\n\n" +
+			"Best regards,\n" +
+			"GopherChat\n"
+		_ = email.SendText(h.SMTPSetting, to, subject, body)
 	}(user.Email, user.Username)
 
 	common.OK(c, gin.H{

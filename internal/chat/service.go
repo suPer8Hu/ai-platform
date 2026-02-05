@@ -65,6 +65,13 @@ func (s *Service) providerForSession(ctx context.Context, sess *Session) (ai.Pro
 	return s.registry.Get(ctx, p, m)
 }
 
+func (s *Service) ListSessions(ctx context.Context, userID uint64, limit int, beforeID uint64) ([]Session, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	return s.repo.ListSessions(ctx, userID, limit, beforeID)
+}
+
 func (s *Service) SendMessage(ctx context.Context, userID uint64, sessionID string, content string) (reply string, assistantMsgID uint64, err error) {
 	// 1) verify session ownership
 	session, err := s.repo.GetSessionBySessionID(ctx, sessionID)

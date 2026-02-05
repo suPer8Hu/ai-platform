@@ -65,6 +65,39 @@ func (h *Handler) CreateChatSession(c *gin.Context) {
 	ok(c, gin.H{"session_id": sess.SessionID})
 }
 
+func (h *Handler) ListChatSessions(c *gin.Context) {
+	uid, okk := userIDFromContext(c)
+	if !okk {
+		fail(c, http.StatusUnauthorized, 40101, "unauthorized")
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	var beforeID uint64
+	if s := c.Query("before_id"); s != "" {
+		if n, err := strconv.ParseUint(s, 10, 64); err == nil {
+			beforeID = n
+		}
+	}
+
+	sess, err := h.ChatSvc.ListSessions(c.Request.Context(), uid, limit, beforeID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 50003, "failed to list sessions")
+		return
+	}
+
+	var nextBeforeID *uint64
+	if len(sess) > 0 {
+		v := sess[len(sess)-1].ID
+		nextBeforeID = &v
+	}
+
+	ok(c, gin.H{
+		"sessions":       sess,
+		"next_before_id": nextBeforeID,
+	})
+}
+
 type sendMessageReq struct {
 	SessionID string `json:"session_id" binding:"required"`
 	Message   string `json:"message" binding:"required"`
