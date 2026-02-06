@@ -21,9 +21,14 @@ type Config struct {
 	ChatContextWindowSize int
 
 	// AI provider
-	AIProvider    string
-	OllamaBaseURL string
-	OllamaModel   string
+	AIProvider         string
+	OllamaBaseURL      string
+	OllamaModel        string
+	OpenRouterBaseURL  string
+	OpenRouterAPIKey   string
+	OpenRouterModel    string
+	OpenRouterSiteURL  string
+	OpenRouterAppName  string
 
 	// rabbitMQ
 	RabbitURL   string
@@ -92,6 +97,15 @@ func Load() Config {
 		ollamaModel = "llama3:latest"
 	}
 
+	openRouterBaseURL := os.Getenv("OPENROUTER_BASE_URL")
+	if openRouterBaseURL == "" {
+		openRouterBaseURL = "https://openrouter.ai/api/v1"
+	}
+	openRouterModel := os.Getenv("OPENROUTER_MODEL")
+	if openRouterModel == "" {
+		openRouterModel = "openrouter/auto"
+	}
+
 	// rabbitMQ config
 	rabbitURL := os.Getenv("RABBIT_URL")
 	if rabbitURL == "" {
@@ -117,9 +131,14 @@ func Load() Config {
 		SMTPFrom:              smtpFrom,
 		ChatContextWindowSize: windowSize,
 
-		AIProvider:    aiProvider,
-		OllamaBaseURL: ollamaBaseURL,
-		OllamaModel:   ollamaModel,
+		AIProvider:        aiProvider,
+		OllamaBaseURL:     ollamaBaseURL,
+		OllamaModel:       ollamaModel,
+		OpenRouterBaseURL: openRouterBaseURL,
+		OpenRouterAPIKey:  os.Getenv("OPENROUTER_API_KEY"),
+		OpenRouterModel:   openRouterModel,
+		OpenRouterSiteURL: os.Getenv("OPENROUTER_SITE_URL"),
+		OpenRouterAppName: os.Getenv("OPENROUTER_APP_NAME"),
 
 		RabbitURL:   rabbitURL,
 		RabbitQueue: rabbitQueue,

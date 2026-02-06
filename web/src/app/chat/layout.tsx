@@ -27,6 +27,25 @@ type Profile = {
   username: string;
 };
 
+const PROVIDER_DEFAULTS: Record<string, string> = {
+  openrouter: "openrouter/auto",
+  ollama: "llama3:latest",
+};
+
+const MODEL_PRESETS: Record<string, string[]> = {
+  openrouter: [
+    "openrouter/auto",
+    "arcee-ai/trinity-large-preview:free",
+    "stepfun/step-3.5-flash:free",
+    "liquid/lfm-2.5-1.2b-thinking:free",
+    "liquid/lfm-2.5-1.2b-instruct:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "arcee-ai/trinity-mini:free",
+    "tngtech/tng-r1t-chimera:free",
+  ],
+  ollama: ["llama3:latest"],
+};
+
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +71,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [deleteAccountConfirm, setDeleteAccountConfirm] = useState(false);
   const [deleteAccountPassword, setDeleteAccountPassword] = useState("");
+  const [newProvider, setNewProvider] = useState("openrouter");
+  const [newModel, setNewModel] = useState(PROVIDER_DEFAULTS.openrouter);
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -83,10 +104,15 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   }
 
   async function createNewChat() {
+    const provider = newProvider.trim();
+    const model = newModel.trim();
     const d = await apiFetch<{ session_id: string }>("/chat/sessions", {
       method: "POST",
       auth: true,
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        provider,
+        model,
+      }),
     });
 
     // Go to new chat
@@ -235,11 +261,86 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     setProfileOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedProvider = window.localStorage.getItem("chat:newProvider");
+    const storedModel = window.localStorage.getItem("chat:newModel");
+    if (storedProvider) {
+      setNewProvider(storedProvider);
+      setNewModel(storedModel || PROVIDER_DEFAULTS[storedProvider] || "");
+      return;
+    }
+    if (storedModel) {
+      setNewModel(storedModel);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("chat:newProvider", newProvider);
+    window.localStorage.setItem("chat:newModel", newModel);
+  }, [newProvider, newModel]);
+
   return (
     <FlowBackground>
       <div className="min-h-screen flex">
         {/* Sidebar */}
         <aside className="w-72 border-r border-white/10 bg-white/5 p-3 text-white backdrop-blur flex flex-col gap-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <div className="rounded border border-white/10 bg-white/5 p-3">
+            <div className="text-xs font-medium text-white/70">New session settings</div>
+            <label className="mt-2 block text-[11px] text-white/60">Provider</label>
+            <select
+              className="mt-1 w-full rounded border border-white/15 bg-white/5 px-2 py-1 text-xs text-white"
+              value={newProvider}
+              onChange={(e) => {
+                const next = e.target.value;
+                const prevDefault = PROVIDER_DEFAULTS[newProvider] || "";
+                setNewProvider(next);
+                setNewModel((prev) => {
+                  if (!prev || prev === prevDefault) {
+                    return PROVIDER_DEFAULTS[next] || "";
+                  }
+                  return prev;
+                });
+              }}
+            >
+              <option value="openrouter">openrouter</option>
+              <option value="ollama">ollama</option>
+            </select>
+
+            <label className="mt-3 block text-[11px] text-white/60">Model</label>
+            <select
+              className="mt-1 w-full rounded border border-white/15 bg-white/5 px-2 py-1 text-xs text-white"
+              value={
+                (MODEL_PRESETS[newProvider] || []).includes(newModel)
+                  ? newModel
+                  : "__custom__"
+              }
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next !== "__custom__") {
+                  setNewModel(next);
+                }
+              }}
+            >
+              {(MODEL_PRESETS[newProvider] || []).map((m) => (
+                <option value={m} key={m}>
+                  {m}
+                </option>
+              ))}
+              <option value="__custom__">Custom…</option>
+            </select>
+            <input
+              className="mt-2 w-full rounded border border-white/15 bg-white/5 px-2 py-1 text-xs text-white placeholder:text-white/40"
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              placeholder={PROVIDER_DEFAULTS[newProvider] || "model-name"}
+            />
+            <div className="mt-2 text-[11px] text-white/50">
+              Used when you click “New chat”.
+            </div>
+          </div>
+
           <button className="border border-white/15 rounded px-3 py-2 text-sm text-white/90 hover:bg-white/10" onClick={createNewChat}>
             New chat
           </button>

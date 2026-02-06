@@ -57,7 +57,21 @@ func (h *Handler) CreateChatSession(c *gin.Context) {
 	var req createSessionReq
 	_ = c.ShouldBindJSON(&req) // allow empty {}
 
-	sess, err := h.ChatSvc.CreateSession(c.Request.Context(), uid, req.Provider, req.Model)
+	provider := strings.TrimSpace(req.Provider)
+	model := strings.TrimSpace(req.Model)
+	if provider == "" {
+		provider = h.Cfg.AIProvider
+	}
+	if model == "" {
+		switch strings.ToLower(provider) {
+		case "openrouter":
+			model = h.Cfg.OpenRouterModel
+		case "ollama", "":
+			model = h.Cfg.OllamaModel
+		}
+	}
+
+	sess, err := h.ChatSvc.CreateSession(c.Request.Context(), uid, provider, model)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, 50001, "failed to create session")
 		return

@@ -166,6 +166,22 @@ func main() {
 		return ai.NewOllamaProvider(cfg.OllamaBaseURL, m), nil
 	})
 
+	// Register OpenRouter (OpenAI-compatible)
+	reg.Register("openrouter", func(ctx context.Context, model string) (ai.Provider, error) {
+		_ = ctx
+		m := strings.TrimSpace(model)
+		if m == "" {
+			m = cfg.OpenRouterModel
+		}
+		return ai.NewOpenRouterProvider(
+			cfg.OpenRouterBaseURL,
+			cfg.OpenRouterAPIKey,
+			m,
+			cfg.OpenRouterSiteURL,
+			cfg.OpenRouterAppName,
+		), nil
+	})
+
 	svc := chat.NewService(repo, reg, cfg.ChatContextWindowSize)
 
 	conn, err := amqp.Dial(cfg.RabbitURL)
